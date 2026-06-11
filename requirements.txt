@@ -1,0 +1,3 @@
+pydantic==2.13.4
+pylxd==2.4.1
+python-dotenv==1.2.2
