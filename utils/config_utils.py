@@ -6,6 +6,7 @@ Zawartość:
                                       między nazwanymi miastami
   * generate_random_distance_matrix — generowanie losowych miast
   * load_distance_matrix_from_csv   — wczytywanie miast z pliku CSV
+  * load_distance_matrix_from_tsp   — wczytywanie instancji z pliku TSPLIB .tsp
 """
 
 import csv
@@ -115,8 +116,8 @@ def load_distance_matrix_from_csv(path: str | Path) -> DistanceMatrix:
     Puste wiersze i wiersze zaczynające się od ``#`` są ignorowane.
     Wymagane co najmniej 3 miasta.
     """
-    coords_cell_start_idx = 2
-    name_cell_idx = 1
+    coords_cell_start_idx = 0
+    name_cell_idx = 0
 
     cor_idx = coords_cell_start_idx
     name_idx = name_cell_idx
@@ -177,3 +178,255 @@ def load_distance_matrix_from_csv(path: str | Path) -> DistanceMatrix:
         raise ValueError("CSV musi zawierać co najmniej 3 miasta")
 
     return DistanceMatrix.from_coordinates(coords)
+
+
+# ---------------------------------------------------------------------------
+# Wczytywanie instancji TSPLIB (.tsp)
+# ---------------------------------------------------------------------------
+
+
+def _tsp_euc2d(ax: float, ay: float, bx: float, by: float) -> float:
+    """Odległość euklidesowa zaokrąglona do najbliższej liczby całkowitej (TSPLIB EUC_2D)."""
+    return float(round(math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)))
+
+
+def _tsp_ceil_euc2d(ax: float, ay: float, bx: float, by: float) -> float:
+    """Odległość euklidesowa sufitowa (TSPLIB CEIL_EUC_2D)."""
+    return float(math.ceil(math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)))
+
+
+def _tsp_att(ax: float, ay: float, bx: float, by: float) -> float:
+    """Pseudo-euklidesowa odległość ATT (TSPLIB ATT, np. att48, att532)."""
+    rij = math.sqrt(((ax - bx) ** 2 + (ay - by) ** 2) / 10.0)
+    tij = round(rij)
+    return float(tij + 1 if tij < rij else tij)
+
+
+def _tsp_geo(ax: float, ay: float, bx: float, by: float) -> float:
+    """
+    Geograficzna odległość (TSPLIB GEO) w kilometrach.
+
+    Wejście: ax/ay to stopnie dziesiętne szerokości/długości geograficznej.
+    """
+    _PI = math.pi
+    _RRR = 6378.388
+
+    def _to_rad(deg_dec: float) -> float:
+        deg = int(deg_dec)
+        minutes = deg_dec - deg
+        return _PI * (deg + 5.0 * minutes / 3.0) / 180.0
+
+    lat_i, lon_i = _to_rad(ax), _to_rad(ay)
+    lat_j, lon_j = _to_rad(bx), _to_rad(by)
+    q1 = math.cos(lon_i - lon_j)
+    q2 = math.cos(lat_i - lat_j)
+    q3 = math.cos(lat_i + lat_j)
+    return float(int(_RRR * math.acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0))
+
+
+def _tsp_man2d(ax: float, ay: float, bx: float, by: float) -> float:
+    """Odległość Manhattan (TSPLIB MAN_2D)."""
+    return float(round(abs(ax - bx) + abs(ay - by)))
+
+
+def _tsp_max2d(ax: float, ay: float, bx: float, by: float) -> float:
+    """Odległość Czebyszewa (TSPLIB MAX_2D)."""
+    return float(round(max(abs(ax - bx), abs(ay - by))))
+
+
+_COORD_DIST_FN = {
+    "EUC_2D": _tsp_euc2d,
+    "CEIL_EUC_2D": _tsp_ceil_euc2d,
+    "ATT": _tsp_att,
+    "GEO": _tsp_geo,
+    "MAN_2D": _tsp_man2d,
+    "MAX_2D": _tsp_max2d,
+}
+
+
+def load_distance_matrix_from_tsp(path: str | Path) -> DistanceMatrix:
+    """
+    Zbuduj ``DistanceMatrix`` z pliku TSPLIB w formacie ``.tsp``.
+
+    Obsługiwane typy wag krawędzi (EDGE_WEIGHT_TYPE):
+      - ``EUC_2D``      — euklidesowa 2D, zaokrąglona
+      - ``CEIL_EUC_2D`` — euklidesowa 2D, sufitowa
+      - ``ATT``         — pseudo-euklidesowa (att48, att532)
+      - ``GEO``         — geograficzna (wielki okrąg)
+      - ``MAN_2D``      — Manhattan
+      - ``MAX_2D``      — Czebyszew
+      - ``EXPLICIT``    — jawna macierz (FULL_MATRIX, UPPER_ROW, LOWER_ROW,
+                          UPPER_DIAG_ROW, LOWER_DIAG_ROW)
+
+    Sekcje danych:
+      - ``NODE_COORD_SECTION`` — współrzędne wierzchołków (dla typów koordynatowych)
+      - ``EDGE_WEIGHT_SECTION`` — surowe wartości wag (dla ``EXPLICIT``)
+
+    Parametry
+    ----------
+    path : ścieżka do pliku .tsp
+
+    Zwraca
+    -------
+    DistanceMatrix
+    """
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+
+    # ---- parsowanie nagłówka ----
+    headers: dict[str, str] = {}
+    data_section: str | None = None
+    data_lines: list[str] = []
+
+    _KNOWN_SECTIONS = {
+        "NODE_COORD_SECTION",
+        "EDGE_WEIGHT_SECTION",
+        "DISPLAY_DATA_SECTION",
+        "TOUR_SECTION",
+        "EOF",
+    }
+
+    for raw in lines:
+        line = raw.strip()
+        if not line or line == "EOF":
+            break
+
+        # Sekcja danych zaczyna się gdy napotkamy jej nagłówek
+        if line in _KNOWN_SECTIONS:
+            data_section = line
+            continue
+
+        if data_section is not None:
+            data_lines.append(line)
+            continue
+
+        # Klucz : wartość lub klucz = wartość
+        if ":" in line:
+            key, _, val = line.partition(":")
+        elif "=" in line:
+            key, _, val = line.partition("=")
+        else:
+            # Może to już początek sekcji bez jawnego słowa kluczowego — ignoruj
+            continue
+        headers[key.strip().upper()] = val.strip()
+
+    weight_type = headers.get("EDGE_WEIGHT_TYPE", "EUC_2D").upper()
+    weight_format = headers.get("EDGE_WEIGHT_FORMAT", "FULL_MATRIX").upper()
+    dimension_str = headers.get("DIMENSION", "")
+    if not dimension_str:
+        raise ValueError(f"Brakujący nagłówek DIMENSION w pliku {path}")
+    n = int(dimension_str)
+
+    # ---- NODE_COORD_SECTION — typy koordynatowe ----
+    if weight_type in _COORD_DIST_FN:
+        dist_fn = _COORD_DIST_FN[weight_type]
+        coords: dict[str, tuple[float, float]] = {}
+
+        # Jeśli sekcja danych nie została jawnie zidentyfikowana w pętli,
+        # spróbuj znaleźć ją ponownie (niektóre pliki mają dane przed EOF)
+        if data_section != "NODE_COORD_SECTION":
+            data_lines = []
+            in_section = False
+            for raw in lines:
+                line = raw.strip()
+                if line == "NODE_COORD_SECTION":
+                    in_section = True
+                    continue
+                if in_section:
+                    if line in _KNOWN_SECTIONS or line == "EOF":
+                        break
+                    data_lines.append(line)
+
+        for raw in data_lines:
+            parts = raw.split()
+            if len(parts) < 3:
+                continue
+            city_id = str(int(parts[0]))  # normalizuj: 0001 → '1', 1 → '1'
+            x, y = float(parts[1]), float(parts[2])
+            coords[city_id] = (x, y)
+
+        if len(coords) != n:
+            raise ValueError(
+                f"Oczekiwano {n} miast (DIMENSION), wczytano {len(coords)} z NODE_COORD_SECTION"
+            )
+
+        city_ids = list(
+            coords.keys()
+        )  # zachowaj kolejność z pliku (mogą być np. 0001, 0002...)
+        m: dict = {a: {} for a in city_ids}
+        for i, a in enumerate(city_ids):
+            ax, ay = coords[a]
+            for j, b in enumerate(city_ids):
+                if i == j:
+                    m[a][b] = 0.0
+                else:
+                    bx, by = coords[b]
+                    m[a][b] = dist_fn(ax, ay, bx, by)
+        return DistanceMatrix(m)
+
+    # ---- EDGE_WEIGHT_SECTION — typ EXPLICIT ----
+    if weight_type == "EXPLICIT":
+        # Zbierz wszystkie tokeny liczbowe z sekcji wag
+        if data_section != "EDGE_WEIGHT_SECTION":
+            data_lines = []
+            in_section = False
+            for raw in lines:
+                line = raw.strip()
+                if line == "EDGE_WEIGHT_SECTION":
+                    in_section = True
+                    continue
+                if in_section:
+                    if line in _KNOWN_SECTIONS or line == "EOF":
+                        break
+                    data_lines.append(line)
+
+        tokens: list[float] = []
+        for raw in data_lines:
+            for tok in raw.split():
+                try:
+                    tokens.append(float(tok))
+                except ValueError:
+                    pass
+
+        city_ids = [str(i + 1) for i in range(n)]
+        m = {a: {b: 0.0 for b in city_ids} for a in city_ids}
+
+        if weight_format == "FULL_MATRIX":
+            if len(tokens) < n * n:
+                raise ValueError(
+                    "Za mało wartości w EDGE_WEIGHT_SECTION dla FULL_MATRIX"
+                )
+            for i in range(n):
+                for j in range(n):
+                    m[city_ids[i]][city_ids[j]] = tokens[i * n + j]
+
+        elif weight_format in {"UPPER_ROW", "UPPER_DIAG_ROW"}:
+            diag = weight_format == "UPPER_DIAG_ROW"
+            idx = 0
+            for i in range(n):
+                start = i if diag else i + 1
+                for j in range(start, n):
+                    v = tokens[idx]
+                    idx += 1
+                    m[city_ids[i]][city_ids[j]] = v
+                    m[city_ids[j]][city_ids[i]] = v
+
+        elif weight_format in {"LOWER_ROW", "LOWER_DIAG_ROW"}:
+            diag = weight_format == "LOWER_DIAG_ROW"
+            idx = 0
+            for i in range(n):
+                end = i + 1 if diag else i
+                for j in range(0, end):
+                    v = tokens[idx]
+                    idx += 1
+                    m[city_ids[i]][city_ids[j]] = v
+                    m[city_ids[j]][city_ids[i]] = v
+
+        else:
+            raise ValueError(f"Nieobsługiwany EDGE_WEIGHT_FORMAT: {weight_format}")
+
+        return DistanceMatrix(m)
+
+    raise ValueError(
+        f"Nieobsługiwany EDGE_WEIGHT_TYPE: {weight_type!r}. "
+        f"Obsługiwane: {', '.join(sorted(_COORD_DIST_FN) + ['EXPLICIT'])}"
+    )

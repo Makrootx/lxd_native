@@ -31,6 +31,7 @@ from config.config import (
 from utils.config_utils import (
     generate_random_distance_matrix,
     load_distance_matrix_from_csv,
+    load_distance_matrix_from_tsp,
 )
 
 from config.ga_config_model import GAConfigModel
@@ -43,6 +44,7 @@ _FLAG_TO_DEST = {
     "--config": "config",
     "--cities": "cities",
     "--cities-csv": "cities_csv",
+    "--cities-tsp": "cities_tsp",
     "--cities-seed": "cities_seed",
     "--workers": "workers",
     "--concurrency": "concurrency",
@@ -122,6 +124,7 @@ def _apply_config_overrides(
         "workers",
         "concurrency",
         "cities_csv",
+        "cities_tsp",
         "population",
         "generations",
         "mutation",
@@ -180,6 +183,16 @@ def parse_args() -> argparse.Namespace:
             "Liczba losowych miast 2D do wygenerowania. "
             "0 (domyślnie) = użyj wbudowanej mapy 100 nazwanych miast. "
             "Musi być >= 3 gdy ustawione."
+        ),
+    )
+    problem.add_argument(
+        "--cities-tsp",
+        type=str,
+        default=None,
+        dest="cities_tsp",
+        help=(
+            "Ścieżka do pliku TSPLIB (.tsp) z instancją TSP. "
+            "Ma najwyższy priorytet spośród źródeł danych."
         ),
     )
     problem.add_argument(
@@ -438,8 +451,11 @@ def main() -> None:
     workers = resolve_workers(args.workers)
 
     # -- Wybór macierzy odległości --
-    if args.cities_csv:
-        # Plik CSV ma najwyższy priorytet.
+    if args.cities_tsp:
+        # Plik TSPLIB ma najwyższy priorytet.
+        matrix = load_distance_matrix_from_tsp(args.cities_tsp)
+    elif args.cities_csv:
+        # Plik CSV ma drugi priorytet.
         matrix = load_distance_matrix_from_csv(args.cities_csv)
     elif args.cities > 0:
         # Losowe miasta z podanym seedem.

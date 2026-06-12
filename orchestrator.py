@@ -132,12 +132,16 @@ class GATSPOrchestrator:
         """
         base_seed = self.ga_config.seed
         worker_tasks = {}
+        t0 = time.time()
+        base_task = self._build_base_task()
         for w_idx, worker in enumerate(self.workers):
-            task = self._build_base_task()
+            task = base_task.copy()
             # Odrębny seed per wyspa: base + indeks * 997 (liczba pierwsza).
             task["seed"] = base_seed + w_idx * 997
             worker_tasks[worker] = task
         self._push_worker_tasks(worker_tasks)
+        t1 = time.time()
+        print(f"  -> Czas wysyłania: {t1 - t0:.1f}s")
         raw = self._execute_raw()
         for worker, res in raw.items():
             print(
@@ -197,10 +201,11 @@ class GATSPOrchestrator:
 
             # Buduje per-pracownik zadanie dla tej rundy.
             worker_tasks: dict = {}
+            base_task = self._build_base_task()
             for w_idx, worker in enumerate(self.workers):
+                task = base_task.copy()
                 # Seed zróżnicowany: base + runda*100_003 + indeks_wyspy*997.
                 worker_seed = base_seed + rounds_done * 100_003 + w_idx * 997
-                task = self._build_base_task()
                 task["generations"] = round_gens
                 task["seed"] = worker_seed
                 if populations[worker] is not None:

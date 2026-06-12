@@ -151,3 +151,6 @@ client.crt
 client.key
 
 results_temp/
+results/
+exp_config/
+ALL_tsp/

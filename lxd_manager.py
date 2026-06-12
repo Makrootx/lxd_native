@@ -254,9 +254,19 @@ class LXDClient:
             "protocol": "simplestreams",
             "mode": "pull",
         }
+        config = {
+            # 1. Force the scheduler to reserve 1 full CPU core for this container
+            "limits.cpu": "1",
+            # 2. Limit RAM so the scheduler tracks memory allocation
+            "limits.memory": "512MiB",
+            # 3. Ensure internal math libraries run single-threaded to prevent core thrashing
+            "environment.OMP_NUM_THREADS": "1",
+            "environment.MKL_NUM_THREADS": "1",
+            "environment.OPENBLAS_NUM_THREADS": "1",
+        }
         params = {"target": target} if target else {}
         resp = self._conn.api.containers.post(
-            json={"name": name, "source": source}, params=params
+            json={"name": name, "source": source, "config": config}, params=params
         )
         op_url = (resp.json() or {}).get("operation", "")
         if op_url:
@@ -329,6 +339,9 @@ class LXDOrchestrator:
         self._shared = LXDClient()
         # Globalny pool — przez niego przechodzi cała praca równoległa.
         self._pool = ThreadPoolExecutor(max_workers=concurrency)
+        # Serializuje wywołania create() żeby scheduler LXD widział aktualne
+        # obciążenie węzłów między kolejnymi requestami.
+        self._create_lock = threading.Lock()
 
     # -- Dedykowany klient per zadanie --
     @staticmethod
@@ -483,14 +496,16 @@ class LXDOrchestrator:
 
         Używa *dedykowanego* ``LXDClient``, dzięki czemu to zadanie nigdy
         nie współdzieli WebSocket z innymi równoległymi zadaniami.
+        Wywołanie create() jest serializowane przez _create_lock, dzięki czemu
+        scheduler LXD widzi aktualne obciążenie węzłów między requestami.
         """
         client = self._dedicated()
         if client.exists(worker):
             print(f"  [prowizjonowanie] {worker} już istnieje — pomijanie tworzenia.")
         else:
-            loc = f" → {target}" if target else ""
-            print(f"  [prowizjonowanie] Tworzenie {worker} (debian/12){loc}...")
-            client.create(worker, "debian/12", target=target)
+            print(f"  [prowizjonowanie] Tworzenie {worker} (debian/12)...")
+            with self._create_lock:
+                client.create(worker, "debian/12", target=target)
 
         self._wait_for_running(client, worker)
         self._fix_dns(client, worker)
@@ -514,7 +529,9 @@ class LXDOrchestrator:
             f"(rozmiar puli: {self.concurrency})..."
         )
 
-        # Użyj węzła docelowego z konfiguracji lub auto-wykryj.
+        # Użyj węzła docelowego z konfiguracji lub pozostaw None (LXD decyduje).
+        # create() jest serializowane przez _create_lock — scheduler LXD
+        # dostaje kolejne requesty dopiero po zatwierdzeniu poprzedniego.
         target: str | None = LXD_TARGET if LXD_TARGET else None
 
         futures = {

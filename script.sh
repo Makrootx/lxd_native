@@ -125,4 +125,14 @@ lxc exec vm1 -- bash -c "echo 'hello from vm1' > /mnt/lxd-shared/test.txt"
 lxc exec vm2 -- bash -c "cat /mnt/lxd-shared/test.txt"
 lxc exec vm3 -- bash -c "cat /mnt/lxd-shared/test.txt"
 
+lxc exec vm1 -- bash
+    lxc network create lxdbr0 --target vm1 && \
+    lxc network create lxdbr0 --target vm2 && \
+    lxc network create lxdbr0 --target vm3 && \
+    lxc network create lxdbr0 
+    exit
 
+lxc exec vm1 -- bash
+    openssl req -x509 -newkey rsa:4096 -keyout client.key -out client.crt -days 365 -nodes -subj "/CN=my-api-client"
+    lxc config trust add client.crt
+    exit
