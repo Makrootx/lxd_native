@@ -438,10 +438,13 @@ class LXDOrchestrator:
 
     def _ensure_python3(self, client: LXDClient, container: str) -> None:
         """Instaluje python3 wewnątrz *container* jeśli jeszcze nie jest dostępny."""
-        stdout, _ = client.execute(container, ["python3", "--version"])
-        if stdout:
-            print(f"  [prowizjonowanie] python3 obecny w {container}: {stdout}")
-            return
+        try:
+            stdout, _ = client.execute(container, ["python3", "--version"])
+            if stdout:
+                print(f"  [prowizjonowanie] python3 obecny w {container}: {stdout}")
+                return
+        except Exception:
+            pass
 
         print(f"  [prowizjonowanie] Instalowanie python3 w {container}...")
         # Czyści listy apt — obcięte pliki Packages powodują błędy aktualizacji.

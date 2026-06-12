@@ -115,6 +115,12 @@ def load_distance_matrix_from_csv(path: str | Path) -> DistanceMatrix:
     Puste wiersze i wiersze zaczynające się od ``#`` są ignorowane.
     Wymagane co najmniej 3 miasta.
     """
+    coords_cell_start_idx = 2
+    name_cell_idx = 1
+
+    cor_idx = coords_cell_start_idx
+    name_idx = name_cell_idx
+
     p = Path(path)
     coords: dict[str, tuple[float, float]] = {}
 
@@ -135,29 +141,29 @@ def load_distance_matrix_from_csv(path: str | Path) -> DistanceMatrix:
             # Opcjonalna obsługa nagłówka — pomiń wiersz jeśli kolumny nie są liczbami.
             if line_no == 1:
                 if len(cells) >= 3 and (
-                    not _is_float(cells[1]) or not _is_float(cells[2])
+                    not _is_float(cells[cor_idx]) or not _is_float(cells[cor_idx + 1])
                 ):
                     continue
                 if len(cells) == 2 and (
-                    not _is_float(cells[0]) or not _is_float(cells[1])
+                    not _is_float(cells[cor_idx]) or not _is_float(cells[cor_idx + 1])
                 ):
                     continue
 
             if len(cells) >= 3:
-                name = cells[0]
-                if not _is_float(cells[1]) or not _is_float(cells[2]):
+                name = cells[name_idx]
+                if not _is_float(cells[cor_idx]) or not _is_float(cells[cor_idx + 1]):
                     raise ValueError(
                         f"Nieprawidłowy wiersz CSV {line_no}: oczekiwano nazwa,x,y z liczbowymi x/y"
                     )
-                x, y = float(cells[1]), float(cells[2])
+                x, y = float(cells[cor_idx]), float(cells[cor_idx + 1])
             elif len(cells) == 2:
-                if not _is_float(cells[0]) or not _is_float(cells[1]):
+                if not _is_float(cells[cor_idx]) or not _is_float(cells[cor_idx + 1]):
                     raise ValueError(
                         f"Nieprawidłowy wiersz CSV {line_no}: oczekiwano x,y z wartościami liczbowymi"
                     )
                 name = str(auto_idx)
                 auto_idx += 1
-                x, y = float(cells[0]), float(cells[1])
+                x, y = float(cells[cor_idx]), float(cells[cor_idx + 1])
             else:
                 raise ValueError(
                     f"Nieprawidłowy wiersz CSV {line_no}: oczekiwano 2 lub 3 kolumny"

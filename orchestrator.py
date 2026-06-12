@@ -363,10 +363,10 @@ class GATSPOrchestrator:
         print(f"Różnorodność kraw. : {div['mean_pairwise_edge_distance']:.4f} (śr)")
         print("──────────────── Czasy faz ──────────────────────────────────")
         if pt:
-            print(f"  Prowizjonowanie  : {pt.get('provision_seconds',  0):.2f}s")
-            print(f"  Przesyłanie kodu : {pt.get('distribute_seconds', 0):.2f}s")
-            print(f"  Wykonanie GA     : {pt.get('execute_seconds',    0):.2f}s")
-        print(f"  Łącznie          : {total:.2f}s")
+            print(f"Prowizjonowanie  : {pt.get('provision_seconds',  0):.2f}s")
+            print(f"Przesyłanie kodu : {pt.get('distribute_seconds', 0):.2f}s")
+            print(f"Wykonanie GA     : {pt.get('execute_seconds',    0):.2f}s")
+        print(f"Łącznie          : {total:.2f}s")
         print("==============================================================")
         print(
             f"\nGOTOWE run_id={meta.get('run_id', 'n/a')} "

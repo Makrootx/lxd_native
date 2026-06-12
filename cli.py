@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -262,8 +263,8 @@ def parse_args() -> argparse.Namespace:
     ga.add_argument(
         "--seed",
         type=int,
-        default=ga_defaults.seed,
-        help="Bazowy seed losowy wysyłany do każdej wyspy.",
+        default=None,
+        help="Bazowy seed losowy wysyłany do każdej wyspy. Gdy pominięty, seed jest losowany.",
     )
 
     # -- Migracja --
@@ -424,6 +425,15 @@ def main() -> None:
     args = parse_args()
     file_cfg = _load_config_file(args.config)
     args = _apply_config_overrides(args, file_cfg, explicit_cli)
+
+    # Jeśli seed nie został podany ani w CLI ani w pliku konfiguracyjnym,
+    # losuj go teraz i wypisz, żeby uruchomienie było powtarzalne.
+    if args.seed is None:
+        args.seed = random.randint(0, 2**31 - 1)
+        print(
+            f"[Seed] Wylosowany seed: {args.seed}  (użyj --seed {args.seed} aby powtórzyć)"
+        )
+
     validate_args(args)
     workers = resolve_workers(args.workers)
 
